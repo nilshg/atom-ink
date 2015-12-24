@@ -1,34 +1,40 @@
 # TODO: invalid results don't fade out
 # In general this is weird and needs a refactor
 # TODO: fade results when the cursor is underneath
+# TODO: better scrolling behaviour
 
 {CompositeDisposable} = require 'atom'
 
 module.exports =
-
   activate: ->
     @subs = new CompositeDisposable()
-
+    @monotypeResults = atom.config.get('ink.monotypeResults')
     @subs.add atom.commands.add 'atom-text-editor:not([mini])',
       'inline-results:clear-current': (e) => @removeCurrent e
       'inline-results:clear-all': => @removeAll()
+      'inline-results:toggle': => @toggleCurrent()
+      'inline-results:copy-current': => @copyCurrent()
 
     @subs.add atom.commands.add '.ink.inline',
       'inline-results:clear': (e) ->
         result = e.currentTarget.result
         setTimeout (-> result.destroy()), 0
+      'inline-results:copy': (e) ->
+        atom.clipboard.write(e.currentTarget.result.view.getAttribute('plain'))
 
   deactivate: ->
     @subs.dispose()
 
   timeout: (t, f) -> setTimeout f, t
 
-  result: (ed, content, {error, clas}) ->
+  result: (ed, content, {error, clas, plainresult}) ->
     view = document.createElement 'div'
     view.classList.add 'ink', 'inline', 'result'
     if error then view.classList.add 'error'
     if clas then view.classList.add clas
-    view.style.position = 'relative'
+    if plainresult then view.setAttribute 'plain', plainresult
+    if @monotypeResults then view.style.font = 'inherit'
+    view.style.position = 'absolute'
     view.style.top = -ed.getLineHeightInPixels() + 'px'
     view.style.left = '10px'
     view.style.pointerEvents = 'auto'
@@ -41,11 +47,11 @@ module.exports =
     r.invalidate = => @invalidate r
     r.validate = => @validate r
 
-  show: (ed, mark, {watch, content, error, clas}={}) ->
+  show: (ed, mark, {watch, content, error, clas, plainresult}={}) ->
     mark.getBufferRange().isReversed and throw "Cannot add result to reversed marker"
     flag = @removeLines ed, mark.getHeadBufferPosition().row,
                             mark.getTailBufferPosition().row
-    result = @result ed, content, {error, clas}
+    result = @result ed, content, {error, clas, plainresult}
     mark.result = result
     result.editor = ed
     result.marker = mark
@@ -53,8 +59,12 @@ module.exports =
     result.decorator = ed.decorateMarker mark,
       type: 'overlay'
       item: result.view
+    # TODO: clean some of this up. It probably belongs in a constructor
     @methods result
-    setTimeout (-> result.view.parentElement.style.pointerEvents = 'none'), 100
+    result.view.addEventListener 'click', =>
+      result.view.parentNode.parentNode.appendChild result.view.parentNode
+    result.view.addEventListener 'mousewheel', (e) ->
+      e.stopPropagation()
     if !flag
       result.view.classList.add 'ink-hide'
       @timeout 20, =>
@@ -138,3 +148,17 @@ module.exports =
       if @removeLines(ed, sel.getHeadBufferPosition().row, sel.getTailBufferPosition().row)
         done = true
     e.abortKeyBinding() unless done
+
+  getCurrentMarkers: ->
+    ed = atom.workspace.getActiveTextEditor()
+    pos = ed.getCursorBufferPosition()
+    ms = ed.findMarkers {containsBufferPosition: pos}
+    ms = ms.filter((m)->m.result?).map((m)->m.result)
+
+  toggleCurrent: ->
+    ms = @getCurrentMarkers()
+    ms.map((m) -> m?.view.firstElementChild?.firstElementChild?.click())
+
+  copyCurrent: ->
+    m = @getCurrentMarkers()[0]
+    atom.clipboard.write(m.view.getAttribute('plain'))
