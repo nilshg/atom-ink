@@ -10,6 +10,12 @@ Console = require './console/console'
 tree    = require './tree'
 
 module.exports = Ink =
+  config:
+    monotypeResults:
+      type: 'boolean'
+      default: false
+      description: 'Display results in your editor\'s monotype font'
+
   activate: ->
     results.activate()
     Console.activate()
@@ -21,7 +27,7 @@ module.exports = Ink =
 
     try
       if id = localStorage.getItem 'metrics.userId'
-        http.get "http://mikeinn.es/hit?id=#{id}&app=ink"
+        http.get "http://data.junolab.org/hit?id=#{id}&app=ink"
 
   deactivate: ->
     results.deactivate()
