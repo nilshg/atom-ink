@@ -1,6 +1,7 @@
 # TODO: invalid results don't fade out
 # In general this is weird and needs a refactor
 # TODO: fade results when the cursor is underneath
+# TODO: better scrolling behaviour
 
 {CompositeDisposable} = require 'atom'
 
@@ -19,7 +20,8 @@ module.exports =
         result = e.currentTarget.result
         setTimeout (-> result.destroy()), 0
       'inline-results:copy': (e) ->
-        atom.clipboard.write(e.currentTarget.result.view.getAttribute('plain'))
+        plaintext = e.currentTarget.result.plainresult
+        if plaintext then atom.clipboard.write(plaintext)
 
   deactivate: ->
     @subs.dispose()
@@ -31,9 +33,8 @@ module.exports =
     view.classList.add 'ink', 'inline', 'result'
     if error then view.classList.add 'error'
     if clas then view.classList.add clas
-    if plainresult then view.setAttribute 'plain', plainresult
     if @monotypeResults then view.style.font = 'inherit'
-    view.style.position = 'relative'
+    view.style.position = 'absolute'
     view.style.top = -ed.getLineHeightInPixels() + 'px'
     view.style.left = '10px'
     view.style.pointerEvents = 'auto'
@@ -54,17 +55,17 @@ module.exports =
     mark.result = result
     result.editor = ed
     result.marker = mark
+    if plainresult? then result.plainresult = plainresult
     result.text = @text result
     result.decorator = ed.decorateMarker mark,
       type: 'overlay'
       item: result.view
+    # TODO: clean some of this up. It probably belongs in a constructor
     @methods result
-    setTimeout (->
-      result.view.parentElement.style.pointerEvents = 'none'
-      result.view.addEventListener 'click', =>
-        # change natural ordering so that a click brings the current overlay
-        # to the top of the stack:
-        result.view.parentNode.parentNode.appendChild result.view.parentNode), 100
+    result.view.addEventListener 'click', =>
+      result.view.parentNode.parentNode.appendChild result.view.parentNode
+    result.view.addEventListener 'mousewheel', (e) ->
+      e.stopPropagation()
     if !flag
       result.view.classList.add 'ink-hide'
       @timeout 20, =>
@@ -161,4 +162,5 @@ module.exports =
 
   copyCurrent: ->
     m = @getCurrentMarkers()[0]
-    atom.clipboard.write(m.view.getAttribute('plain'))
+    plaintext = m.plainresult
+    if plaintext then atom.clipboard.write(plaintext)
