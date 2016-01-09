@@ -47,6 +47,49 @@ module.exports =
     r.invalidate = => @invalidate r
     r.validate = => @validate r
 
+  # These are proxy methods that do something similar to the existing `show`,
+  # but will be changed to real underline results once atom/atom#9930 lands.
+  toggleUnderline: (ed, range, {content, clas}) ->
+    mark = ed.markBufferRange range
+    od = @forLines ed, range.start.row, range.start.row
+    # Compare the contents of our new range with those of possible old underline
+    # results. If they are equal, destroy the old result and exit; otherwise,
+    # destroy the old result and display the new one.
+    sameWord = false
+    if od.length > 0
+      sameWord = if od.filter((m) => m.text == @text({editor: ed, marker: mark})).length > 0 then true
+    @removeLines ed, range.start.row, range.start.row, {destroyUnderline: true, onlyDestroyUnderline: true}
+    if !sameWord then @showUnderline ed, mark, {content, clas}
+
+  showUnderline:  (ed, mark, {content, clas}) ->
+    result = @underlineResult ed, content, clas
+    mark.result = result
+    result.editor = ed
+    result.marker = mark
+    result.text = @text result
+    result.decorator = ed.decorateMarker mark,
+      type: 'overlay'
+      item: result.view
+    @methods result
+    result.ownsMark = true
+    result.isUnderline = true
+    result.view.result = content
+    result.view.addEventListener 'click', =>
+      result.view.parentNode.parentNode.appendChild result.view.parentNode
+    result.view.addEventListener 'mousewheel', (e) ->
+      e.stopPropagation()
+    @watchNewline result
+    result
+
+  underlineResult: (ed, content, clas) ->
+    view = document.createElement 'div'
+    view.classList.add 'ink', 'underline'
+    view.style.position = 'relative'
+    view.style.pointerEvents = 'auto'
+    if clas then view.classList.add clas
+    view.appendChild content
+    view: view
+
   show: (ed, mark, {watch, content, error, clas, plainresult}={}) ->
     mark.getBufferRange().isReversed and throw "Cannot add result to reversed marker"
     flag = @removeLines ed, mark.getHeadBufferPosition().row,
@@ -57,6 +100,7 @@ module.exports =
     result.marker = mark
     if plainresult? then result.plainresult = plainresult
     result.text = @text result
+    result.isUnderline = false
     result.decorator = ed.decorateMarker mark,
       type: 'overlay'
       item: result.view
@@ -131,11 +175,12 @@ module.exports =
                                  m.getBufferRange().intersectsRowRange(start, end))
                     .map((m)->m.result)
 
-  removeLines: (ed, start, end) ->
+  removeLines: (ed, start, end, {destroyUnderline, onlyDestroyUnderline} = {}) ->
     flag = false
-    for r in @forLines ed, start, end
-      flag = true
-      r.destroy()
+    for r in @forLines(ed, start, end)
+      if r.isUnderline && destroyUnderline? || !r.isUnderline && !onlyDestroyUnderline?
+        flag = true
+        r.destroy()
     flag
 
   removeAll: (ed) ->
@@ -146,7 +191,7 @@ module.exports =
   removeCurrent: (e) ->
     ed = e.currentTarget.getModel()
     for sel in ed.getSelections()
-      if @removeLines(ed, sel.getHeadBufferPosition().row, sel.getTailBufferPosition().row)
+      if @removeLines(ed, sel.getHeadBufferPosition().row, sel.getTailBufferPosition().row, {destroyUnderline: true})
         done = true
     e.abortKeyBinding() unless done
 
@@ -158,6 +203,7 @@ module.exports =
 
   toggleCurrent: ->
     ms = @getCurrentMarkers()
+    # *shudder*... needs refactoring.
     ms.map((m) -> m?.view.firstElementChild?.firstElementChild?.click())
 
   copyCurrent: ->
