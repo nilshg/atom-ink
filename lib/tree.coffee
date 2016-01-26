@@ -1,7 +1,7 @@
 {$, $$} = require 'atom-space-pen-views'
 
 module.exports =
-  treeView: (head, children) ->
+  treeView: (head, children, {expand}) ->
     view = $$ ->
       @div class: 'ink tree', =>
         @span class: 'icon icon-chevron-right'
@@ -10,25 +10,19 @@ module.exports =
     view.find('> .header').append head
     view.find('> .body').append child for child in children
 
-    view.find('> .body').hide()
+    view.find('> .body').hide() unless expand
     view.find('> .icon').click => @toggle view
     view.find('> .header').click => @toggle view
 
-    view
-
-  fromJson: (data) ->
-    if data.constructor == Array && data.length == 2
-      [head, children] = data
-      @treeView head, (@fromJson child for child in children)
-    else
-      view = $$ -> @div()
-      view.append data
-      view
+    view[0]
 
   toggle: (view) ->
-    view.find('> .body').toggle()
+    view = $(view)
+    body = view.find('> .body')
     icon = view.find('> .icon')
-    if not view.visible
+    return unless body[0]?
+    body.toggle()
+    if body.isVisible()
       view.visible = true
       icon.removeClass 'icon-chevron-right'
       icon.addClass 'icon-chevron-down'

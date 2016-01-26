@@ -7,17 +7,15 @@ class ConsoleView extends ScrollView
     @div class: 'pane-item', tabindex: -1, =>
       @div class: 'ink-console', =>
         @div class: 'gutter'
-        @div class: 'items-scroll', =>
-          @div class: 'items'
+        @div class: 'items-scroll', tabindex: -1, =>
+          @div class: 'items', =>
           @div class: 'spacer'
 
   initialize: ->
     super
     @items = @element.querySelector '.items'
     @scrollView = @element.querySelector '.items-scroll'
-    @element.onclick = =>
-      if @shouldScroll() and !document.getSelection().toString()
-        @focusInput()
+    @element.querySelector('.spacer').onclick = => @focusInput()
 
   getTitle: ->
     "Console"
@@ -26,7 +24,7 @@ class ConsoleView extends ScrollView
     "terminal"
 
   addItem: (view, {divider}={divider:true}) ->
-    scroll = @shouldScroll()
+    scroll = @lastCellVisible()
     @fadeIn view
     @items.appendChild view
     if divider then @divider()
@@ -41,7 +39,7 @@ class ConsoleView extends ScrollView
     @getInput()?.querySelector('atom-text-editor')?.getModel()
 
   addBeforeInput: (view, {divider}={divider:true}) ->
-    if @shouldScroll() then @lock 200
+    if @lastCellVisible() then @lock 200
     @items.insertBefore view, @getInput()
     if divider then @divider(true)
     @slideIn view
@@ -179,7 +177,7 @@ class ConsoleView extends ScrollView
 
   last: (xs) -> xs[xs.length-1]
 
-  shouldScroll: ->
+  lastCellVisible: ->
     items = @items.querySelectorAll('.cell')
     return false unless items[0]
     @isVisible @scrollView, @last items
