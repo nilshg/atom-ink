@@ -1,151 +1,293 @@
 # TODO: autocomplete
 
-{Emitter} = require 'atom'
+{Emitter, CompositeDisposable} = require 'atom'
 ConsoleView = require './view'
+HistoryProvider = require './history'
+{closest} = require './helpers'
+
+getConsole = (el) -> closest(el, 'ink-console').getModel()
 
 module.exports =
 class Console
   @activate: ->
-    # TODO: eval only in last editor
-    @evalCmd = atom.commands.add '.ink-console atom-text-editor',
+    @subs = new CompositeDisposable
+    @subs.add atom.commands.add 'ink-console atom-text-editor:not([mini])',
       'console:evaluate': ->
-        ed = @getModel()
-        ed.inkConsole.emitter.emit 'eval', ed
+        getConsole(this).eval this
+      'core:move-up': (e) ->
+        getConsole(this).keyUp e, this
+      'core:move-down': (e) ->
+        getConsole(this).keyDown e, this
+      'core:move-left': (e) ->
+        delete getConsole(this).prefix
+      'core:move-right': (e) ->
+        delete getConsole(this).prefix
       'core:backspace': (e) ->
-        @getModel().inkConsole.cancelMode e
-      'console:previous-in-history': ->
-        @getModel().inkConsole.previous()
-      'console:next-in-history': ->
-        @getModel().inkConsole.next()
+        getConsole(this).cancelMode this
+
+    @subs.add atom.commands.add 'ink-console',
+      'core:copy': ->
+        if (sel = document.getSelection().toString())
+          atom.clipboard.write sel
+      'console:previous-in-history': -> @getModel().previous()
+      'console:next-in-history': -> @getModel().next()
 
   @deactivate: ->
-    @openCmd.dispose()
-    @clearCmd.dispose()
+    @subs.dispose()
 
-  constructor: ->
-    @view.getModel = -> c
-    @observeInput (cell) =>
-      @watchModes cell
-    @onEval => @logInput()
+  @registerViews: ->
+    atom.views.addViewProvider Console, (c) ->
+      new ConsoleView().initialize c
 
-  view: new ConsoleView
+    atom.deserializers.add
+      name: 'InkConsole'
+      deserialize: ({id}) ->
+        Console.registered[id] = new Console(id: id)
 
-  isInput: false
+  activate: ->
+    for pane in atom.workspace.getPanes()
+      for item in pane.getItems()
+        if item is this
+          pane.activate()
+          pane.activateItem this
+          return true
+    return false
 
-  setGrammar: (g) ->
-    @view.setGrammar g
+  constructor: ({initialInput, @id}={}) ->
+    @items = []
+    @history = new HistoryProvider
+    @emitter = new Emitter
+    initialInput ?= true
+    if initialInput then setTimeout (=> @input()), 100 # Wait for grammars to load
+
+  getTitle: ->
+    "Console"
+
+  getIconName: ->
+    "terminal"
+
+  # Basic item / input logic
+
+  push: (cell) ->
+    @items.push cell
+    @emitter.emit 'did-add-item', cell
+
+  onDidAddItem: (f) -> @emitter.on 'did-add-item', f
+
+  insert: (cell, i) ->
+    if i >= @items.length or @items.length is 0
+      @push cell
+    else
+      @items.splice(i, 0, cell)
+      @emitter.emit 'did-insert-item', [cell, i]
+
+  onDidInsertItem: (f) -> @emitter.on 'did-insert-item', f
+
+  clear: (cell) ->
+    @items = []
+    @emitter.emit 'did-clear'
+
+  onDidClear: (f) -> @emitter.on 'did-clear', f
+
+  getInput: ->
+    last = @items[@items.length-1]
+    if last?.input then last
+
+  lastOutput: -> @items[@items.length - (if @getInput() then 2 else 1)]
 
   input: ->
-    v = @view.inputView this
-    @emitter.emit 'new-input', v
-    @view.add v
-    @isInput = true
+    delete @prefix
+    if not @getInput()
+      item = type: 'input', input: true
+      @push @setMode item
+      @watchModes item
+      @focusInput()
+      item
+    else
+      @getInput()
 
   done: ->
-    @view.getInput().querySelector('atom-text-editor').removeAttribute('tabindex')
-    @isInput = false
+    if @getInput()
+      @getInput().input = false
+      @emitter.emit 'done'
 
-  @debounce: (t, f) ->
-    timeout = null
-    (args...) ->
-      if timeout? then clearTimeout timeout
-      timeout = setTimeout (=> f.call this, args...), t
+  onDone: (f) -> @emitter.on 'done', f
 
-  @buffer: (f) ->
-    buffer = []
-    flush = @debounce 10, ->
-      f.call this, buffer.join('').trim()
-      buffer = []
-    (s) ->
-      buffer.push(s)
-      flush.call this
-
-  out: @buffer (s) -> @view.add @view.outView(s), @isInput
-
-  err: @buffer (s) -> @view.add @view.errView(s), @isInput
-
-  info: @buffer (s) -> @view.add @view.infoView(s), @isInput
-
-  result: (r, opts) -> @view.add @view.resultView(r, opts), @isInput
-
-  clear: ->
-    @done()
-    @view.clear()
+  output: (cell) ->
+    if @getInput()?
+      @insert cell, @items.length-1
+    else
+      @push cell
 
   reset: ->
-    focus = @view.hasFocus()
+    @done()
     @clear()
     @input()
-    @view.focusInput focus
+    @focusInput true
 
-  emitter: new Emitter
+  itemForView: (view) ->
+    return view unless view instanceof HTMLElement
+    for item in @items
+      if item.cell.contains view
+        return item
+
+  eval: (item) ->
+    item = @itemForView item
+    if item.input
+      @emitter.emit 'eval', item
+    else if (input = @getInput())
+      input.editor.setText item.editor.getText()
+      @focusInput true
 
   onEval: (f) -> @emitter.on 'eval', f
 
-  observeInput: (f) -> @emitter.on 'new-input', f
+  focusInput: (force) ->
+    if @getInput()? then @emitter.emit 'focus-input', force
 
-  openInTab: ->
-    p = atom.workspace.getActivePane()
-    if p.items.length > 0
-      p = p.splitDown()
-      p.setFlexScale 1/2
-    p.activateItem @view
-    p.onDidActivate => setTimeout  => @view.focusInput(true)
+  onFocusInput: (f) -> @emitter.on 'focus-input', f
 
-  toggle: ->
-    if atom.workspace.getPaneItems().indexOf(@view) > -1
-      @view[0].parentElement.parentElement.getModel().removeItem @view
+  loading: (status) -> @emitter.emit 'loading', status
+
+  onLoading: (f) -> @emitter.on 'loading', f
+
+  # Output
+
+  bufferOut: (item) ->
+    {type, text} = item
+    last = @lastOutput()
+    if last?.type is type and last.expires > performance.now()
+      last.text += text
     else
-      @openInTab()
-      @view.focusInput()
+      @output item
+    @lastOutput().expires = performance.now() + 100
 
-  modes: -> {}
+  stdout: (s) -> @bufferOut type: 'stdout', icon: 'quote', text: s
+
+  stderr: (s) -> @bufferOut type: 'stderr', icon: 'alert', text: s
+
+  info: (s) -> @bufferOut type: 'info', icon: 'info', text: s
+
+  result: (r, {error}={}) ->
+    @output
+      type: 'result'
+      icon: if error then 'x' else 'check'
+      result: r
+      error: error
+
+#                ___                     _ _ _
+#               ( /                _/_  ( / ) )      /
+#                / _ _    ,_   , , /     / / / __ __/ _  (
+#              _/_/ / /__/|_)_(_/_(__   / / (_(_)(_/_(/_/_)_
+#                        /|
+#                       (/
+
+  getModes: -> []
+
+  setModes: (modes) -> @getModes = -> modes
+
+  defaultMode: ->
+    for mode in @getModes()
+      return mode if mode.default
+    return {}
+
+  getMode: (name) ->
+    return name if name instanceof Object
+    for mode in @getModes()
+      return mode if mode.name is name
+    return @defaultMode()
+
+  modeForPrefix: (prefix) ->
+    for mode in @getModes()
+      return mode if mode.prefix is prefix or mode.prefix is prefix
+
+  setMode: (item, mode = @defaultMode()) ->
+    mode = @getMode mode
+    item.mode = mode
+    item.icon = mode.icon or 'chevron-right'
+    item.grammar = mode.grammar
+    item
 
   cursorAtBeginning: (ed) ->
     ed.getCursors().length == 1 and
     ed.getCursors()[0].getBufferPosition().isEqual [0, 0]
 
-  setMode: (cell, mode) ->
-    ed = ed = cell.querySelector('atom-text-editor').getModel()
-    if not mode
-      delete ed.inkConsoleMode
-      if @view.defaultGrammar then ed.setGrammar @view.defaultGrammar
-      @view.setIcon cell, 'chevron-right'
-    else
-      ed.inkConsoleMode = mode
-      if mode.grammar then ed.setGrammar mode.grammar
-      @view.setIcon cell, mode.icon
-
-  watchModes: (cell) ->
+  watchModes: (item) ->
+    {editor, mode} = item
+    return unless editor?
     @edListener?.dispose()
-    ed = cell.querySelector('atom-text-editor').getModel()
-    @edListener = ed.onWillInsertText (e) =>
-      if (mode = @modes()[e.text]) and @cursorAtBeginning(ed) and not ed.inkConsoleMode
+    @edListener = editor.onWillInsertText (e) =>
+      newmode = @modeForPrefix e.text
+      if newmode? and @cursorAtBeginning(editor) and newmode isnt mode
         e.cancel()
-        @setMode cell, mode
+        @setMode item, newmode
+    item
 
-  cancelMode: (e) ->
-    ed = e.currentTarget.getModel()
-    cell = e.currentTarget.parentElement.parentElement
-    if @cursorAtBeginning(ed) and ed.inkConsoleMode
-      @setMode cell
+  cancelMode: (item) ->
+    {editor} = item = @itemForView item
+    if @cursorAtBeginning(editor)
+      @setMode item
+
+#                        __  ___      __
+#                       / / / (_)____/ /_____  _______  __
+#                      / /_/ / / ___/ __/ __ \/ ___/ / / /
+#                     / __  / (__  ) /_/ /_/ / /  / /_/ /
+#                    /_/ /_/_/____/\__/\____/_/   \__, /
+#                                                /____/
 
   logInput: ->
-    @history ?= []
-    ed = @view.getInputEd()
-    input = ed.getText()
-    mode = ed.inkConsoleMode
-    if input && input != @history[@history.length-1]?.input then @history.push {input, mode}
-    @historyPos = @history.length
+    {editor, mode} = @getInput()
+    @history.push
+      input: editor.getText()
+      mode: mode?.name
 
-  previous: ->
-    if @historyPos > 0
-      @historyPos--
-      @view.getInputEd().setText @history[@historyPos].input
-      @setMode @view.getInput(), @history[@historyPos].mode
+  moveHistory: (up) ->
+    {editor} = @getInput()
+    if editor.getText() or not @prefix?
+      pos = editor.getCursorBufferPosition()
+      text = editor.getTextInRange [[0,0], pos]
+      @prefix = {pos, text}
+    next = if up
+      @history.getPrevious @prefix.text
+    else
+      @history.getNext @prefix.text
+    editor.setText next.input
+    @setMode @getInput(), next.mode
+    editor.setCursorBufferPosition @prefix.pos or [0, 0]
 
-  next: ->
-    if @historyPos < @history.length
-      @historyPos += 1
-      @view.getInputEd().setText (@history[@historyPos]?.input or "")
-      @setMode @view.getInput(), @history[@historyPos]?.mode
+  previous: -> @moveHistory true
+  next: -> @moveHistory false
+
+  keyUp: (e, item) ->
+    {editor, input} = @itemForView item
+    if input
+      curs = editor.getCursorsOrderedByBufferPosition()
+      if curs.length is 1 and (@prefix? or curs[0].getBufferRow() == 0)
+        e.stopImmediatePropagation()
+        @previous()
+
+  keyDown: (e, item) ->
+    {editor, input} = @itemForView item
+    if input
+      curs = editor.getCursorsOrderedByBufferPosition()
+      if curs.length is 1 and (@prefix? or curs[0].getBufferRow()+1 == editor.getLineCount())
+        e.stopImmediatePropagation()
+        @next()
+
+  # Serialisation
+
+  @registered: {}
+
+  id: ''
+
+  serialize: ->
+    if @id
+      deserializer: 'InkConsole'
+      id: @id
+
+  @fromId: (id) ->
+    if cons = Console.registered[id]
+      cons
+    else
+      Console.registered[id] = new Console(id: id)
+
+Console.registerViews()

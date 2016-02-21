@@ -1,23 +1,16 @@
 {CompositeDisposable} = require 'atom'
 http = require 'http'
 Loading = require './util/loading'
-links   = require './util/file-links'
 block   = require './editor/block'
 highlights = require './editor/highlights'
-results = require './editor/results'
+Result = require './editor/result'
 Spinner = require './editor/spinner'
 Console = require './console/console'
 tree    = require './tree'
 
 module.exports = Ink =
-  config:
-    monotypeResults:
-      type: 'boolean'
-      default: false
-      description: 'Display results in your editor\'s monotype font'
-
   activate: ->
-    results.activate()
+    Result.activate()
     Console.activate()
 
     edId = 1
@@ -30,16 +23,19 @@ module.exports = Ink =
         http.get "http://data.junolab.org/hit?id=#{id}&app=ink"
 
   deactivate: ->
-    results.deactivate()
+    Result.deactivate()
     Console.deactivate()
+
+    # Not sure why this gets set, but it prevents pane serialisation
+    pkg = atom.packages.getActivePackage('ink')
+    localStorage.clear(pkg.getCanDeferMainModuleRequireStorageKey())
 
   provide: ->
     highlight: (ed, start, end) =>
       block.highlight ed, start, end
     Loading: Loading
     Spinner: Spinner
-    results: results
+    Result: Result
     Console: Console
     highlights: highlights
     tree: tree
-    links: links

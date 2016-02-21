@@ -1,225 +1,189 @@
-{$, $$, ScrollView, TextEditorView} = require 'atom-space-pen-views'
+class ConsoleElement extends HTMLElement
 
-module.exports =
-class ConsoleView extends ScrollView
+  createdCallback: ->
+    @setAttribute 'tabindex', -1
+    @gutter = document.createElement 'div'
+    @gutter.classList.add 'gutter'
+    @appendChild @gutter
+    @items = document.createElement 'div'
+    @items.classList.add 'items'
+    @appendChild @items
 
-  @content: ->
-    @div class: 'pane-item', tabindex: -1, =>
-      @div class: 'ink-console', =>
-        @div class: 'gutter'
-        @div class: 'items-scroll', =>
-          @div class: 'items'
-          @div class: 'spacer'
+    @style.fontSize = atom.config.get('editor.fontSize') + 'px'
+    @style.fontFamily = atom.config.get('editor.fontFamily')
 
-  initialize: ->
-    super
-    @items = @element.querySelector '.items'
-    @scrollView = @element.querySelector '.items-scroll'
-    @element.onclick = =>
-      if @shouldScroll() and !document.getSelection().toString()
-        @focusInput()
+    @views = {}
+    for view in ['input', 'stdout', 'stderr', 'info', 'result']
+      @views[view] = this["#{view}View"].bind this
 
-  getTitle: ->
-    "Console"
+  initialize: (@model) ->
+    @getModel = -> @model
+    @model.onDidAddItem (item) => @addItem item
+    @model.onDidInsertItem ([item, i]) => @insertItem [item, i]
+    @model.onDidClear => @clear()
+    @model.onDone => if @hasFocus() then @focus()
+    @model.onFocusInput (force) => @focusLast force
+    @model.onLoading (status) => @loading status
+    @onfocus = =>
+      if document.activeElement == this and @model.getInput()
+        @focusLast()
+    for item in @model.items
+      @addItem item
+    @
 
-  getIconName: ->
-    "terminal"
+  getModel: -> @model
 
-  addItem: (view, {divider}={divider:true}) ->
-    scroll = @shouldScroll()
-    @fadeIn view
-    @items.appendChild view
-    if divider then @divider()
-    if scroll then @scroll()
-    view
+  initView: (item) ->
+    item.view ?= @views[item.type](item)
+    item.cell ?= @cellView item
+    item
 
-  getInput: ->
-    items = @items.querySelectorAll '.cell'
-    items[items.length-1]
+  addItem: (item) ->
+    {cell} = @initView item
+    @lock =>
+      @items.appendChild cell
+      @items.appendChild @divider()
+    @loading()
 
-  getInputEd: ->
-    @getInput()?.querySelector('atom-text-editor')?.getModel()
+  insertItem: ([item, i]) ->
+    {cell} = @initView item
+    before = @model.items[i+1].cell
+    @lock =>
+      @items.insertBefore cell, before
+      @items.insertBefore @divider(), before
+    @loading()
 
-  addBeforeInput: (view, {divider}={divider:true}) ->
-    if @shouldScroll() then @lock 200
-    @items.insertBefore view, @getInput()
-    if divider then @divider(true)
-    @slideIn view
-    view
-
-  add: (item, isInput, opts) ->
-    if !isInput
-      @addItem item, opts
-    else
-      @addBeforeInput item, opts
-
-  divider: (input) ->
+  divider: ->
     d = document.createElement 'div'
     d.classList.add 'divider'
-    if not input then @lastDivider = d
-    if input then @addBeforeInput(d, {}) else @addItem((@fadeIn d), {})
-    @updateLoading()
+    d
 
   clear: ->
+    if @hasFocus() then @focus() # Don't lose focus completely when removing a
+                                 # focused editor
     while @items.hasChildNodes()
       @items.removeChild @items.lastChild
-    delete @lastDivider
 
-  setGrammar: (g) ->
-    @defaultGrammar = g
+  queryLast: (view, q) ->
+    items = view.querySelectorAll q
+    items[items.length - 1]
+
+  lastCell: -> @queryLast @items, '.cell'
+
+  lastDivider: -> @queryLast @items, '.divider'
+
+  isVisible: (pane, view) ->
+    if !view? then [pane, view] = [@, pane]
+    return unless view?
+    pane = pane.getBoundingClientRect()
+    view = view.getBoundingClientRect()
+    pane.bottom >= view.top >= pane.top or pane.bottom >= view.bottom >= pane.top
+
+  focusVisible: (view, force) ->
+    if force or @isVisible view
+      view.focus()
+
+  focusLast: (force) ->
+    if @hasFocus() and (view = @model.items[@model.items.length-1]?.view)
+      @focusVisible view, force
+
+  # Various cell views
+
+  observeKey: (obj, key, cb) ->
+    Object.observe obj, (changes) ->
+      for change in changes
+        if change.name is key
+          cb(change.object[key])
+          return
 
   iconView: (name) ->
     icon = document.createElement 'span'
     icon.classList.add 'icon', 'icon-'+name
     icon
 
-  cellView: (v, {icon, gutterText}={}) ->
+  cellView: (item) ->
+    {view, icon} = item
     cell = document.createElement 'div'
     cell.classList.add 'cell'
+    cell.setAttribute 'tabindex', -1
+
     gutter = document.createElement 'div'
     gutter.classList.add 'gutter'
-    if icon then gutter.innerHTML = "<span class='icon icon-#{icon}'></span>"
+    cell.appendChild gutter
+
+    @observeKey item, 'icon', => @updateIcon item
+    @updateIcon {cell, icon: item.icon}
+
     content = document.createElement 'div'
     content.classList.add 'content'
-    content.appendChild v
-    cell.appendChild gutter
+    content.appendChild view
     cell.appendChild content
+
     cell
 
-  streamView: (text, type, icon) ->
-    out = document.createElement 'div'
-    out.style.fontSize = atom.config.get('editor.fontSize') + 'px'
-    out.style.fontFamily = atom.config.get('editor.fontFamily')
-    out.innerText = text
-    out.classList.add type, 'stream'
-    @cellView out,
-      icon: icon
-
-  outView: (s) -> @streamView s, 'output', 'quote'
-
-  errView: (s) -> @streamView s, 'err', 'alert'
-
-  infoView: (s) -> @streamView s, 'info', 'info'
-
-  resultView: (r, {icon, error}={}) ->
-    icon ?= if error then 'x' else 'check'
-    view = $$ ->
-      @div class: 'result'
-    if error then view.addClass 'error'
-    view.append r
-    @cellView view[0],
-      icon: icon
-
-  inputView: (con) ->
+  inputView: (item) ->
     ed = document.createElement 'atom-text-editor'
-    if @defaultGrammar? then ed.getModel().setGrammar @defaultGrammar
-    ed.getModel().setLineNumberGutterVisible(false)
-    ed.getModel().inkConsole = con
-    @cellView ed,
-      icon: 'chevron-right'
+    # Wait for ed to be attached
+    setTimeout (-> ed.component?.presenter.scrollPastEnd = false), 0
+    item.editor = ed.getModel()
+    item.editor.setLineNumberGutterVisible(false)
+    @updateGrammar item
+    @observeKey item, 'grammar', => @updateGrammar item
+    ed
 
-  visible: ->
-    document.contains @element
+  updateGrammar: ({editor, grammar}) ->
+    editor.setGrammar atom.grammars.grammarForScopeName grammar
 
-  fadeIn: (view) ->
-    if @visible()
-      view.classList.add 'ink-hide'
-      setTimeout (-> view.classList.remove 'ink-hide'), 0
+  streamView: (item, type) ->
+    out = document.createElement 'div'
+    out.innerText = item.text
+    @observeKey item, 'text', (text) =>
+      @lock -> out.innerText = text
+    out.classList.add type, 'stream'
+    out
+
+  stdoutView: (item) -> @streamView item, 'output'
+
+  stderrView: (item) -> @streamView item, 'err'
+
+  infoView: (item) -> @streamView item, 'info'
+
+  resultView: ({result, error}) ->
+    view = document.createElement 'div'
+    view.classList.add 'result'
+    if error then view.classList.add 'error'
+    view.appendChild result
     view
 
-  fadeOut: (view) ->
-    if @visible()
-      view.classList.add 'ink-hide'
-      setTimeout (-> view.parentElement?.removeChild(view)), 100
-    view
-
-  slideIn: (view) ->
-    if @visible()
-      h = view.clientHeight
-      view.style.height = '0'
-      setTimeout (-> view.style.height = h + 'px'), 0
-      setTimeout (-> view.style.height = ''), 100
-    view
-
-  setIcon: (cell, name) ->
+  updateIcon: ({cell, icon}) ->
     gutter = cell.querySelector '.gutter'
-    icon = cell.querySelector '.icon'
-    gutter.removeChild icon
-    icon2 = @iconView name
+    iconView = cell.querySelector '.icon'
+    if iconView? then gutter.removeChild iconView
+    icon2 = @iconView icon
     gutter.appendChild icon2
 
   hasFocus: ->
-    @element.contains document.activeElement
+    @contains document.activeElement
 
-  focusInput: (force) ->
-    if force or @hasFocus()
-      @getInput()?.querySelector('atom-text-editor')?.focus()
-
-  loading: (l) ->
+  loading: (l = @isLoading) ->
     if l
       @loading false
-      @items.querySelector('.divider:last-child').classList.add 'loading'
+      @lastDivider()?.classList.add 'loading'
     else
       @items.querySelector('.divider.loading')?.classList.remove 'loading'
+    @isLoading = l
 
-  updateLoading: ->
-    if document.querySelector('.divider.loading')? then @loading true
+  # Scrolling
 
-  scrollValue: ->
-    @scrollView.scrollTop
-
-  scrollEndValue: ->
-    return 0 unless @lastDivider
-    @lastDivider.offsetTop - @scrollView.clientHeight + 8
-
-  isVisible: (pane, view) ->
-    [top, bottom] = [pane.scrollTop, bottom = pane.scrollTop + pane.clientHeight]
-    [ptop, pbottom] = [view.offsetTop, view.offsetTop + view.clientHeight]
-    bottom >= ptop >= top || bottom >= pbottom >= top
-
-  last: (xs) -> xs[xs.length-1]
-
-  shouldScroll: ->
-    items = @items.querySelectorAll('.cell')
-    return false unless items[0]
-    @isVisible @scrollView, @last items
-
-  isScrolling: false
-
-  _scroll: ->
-    target = @scrollEndValue()
-    delta = target-@scrollView.scrollTop
-    mov = Math.max delta/2, 5
-    mov = Math.min delta, mov
-    if delta > 0
-      @isScrolling = true
-      @scrollView.scrollTop += mov
-      requestAnimationFrame => @_scroll()
+  lock: (f) ->
+    last = @lastCell()
+    if @isVisible last
+      target = last.offsetTop + last.clientHeight - @scrollTop
+      f()
+      last = @lastCell()
+      delta = last.offsetTop + last.clientHeight - @scrollTop - target
+      @scrollTop += delta
     else
-      @isScrolling = false
-      @focusInput()
+      f()
 
-  scroll: ->
-    if not @isScrolling
-      @_scroll()
-
-  _lock: (input, target) ->
-    if input.offsetTop + input.clientHeight + 10 <
-         @scrollView.scrollTop + @scrollView.clientHeight
-      target = input.offsetTop - @scrollView.scrollTop
-    else
-      delta = input.offsetTop - @scrollView.scrollTop - target
-      @scrollView.scrollTop += delta
-    requestAnimationFrame (t) =>
-      if t > @isScrolling
-        @isScrolling = false
-      else
-        @_lock input, target
-
-  lock: (time) ->
-    scrolling = @isScrolling
-    @isScrolling = performance.now() + time
-    if not scrolling
-      input = @getInput()
-      target = input.offsetTop - @scrollView.scrollTop
-      @_lock input, target
+module.exports = ConsoleElement = document.registerElement 'ink-console', prototype: ConsoleElement.prototype
