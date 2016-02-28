@@ -2,50 +2,78 @@
 
 {Emitter} = require 'atom'
 ConsoleView = require './view'
+HistoryProvider = require './history'
 
 module.exports =
 class Console
   @activate: ->
-    # TODO: eval only in last editor
     @evalCmd = atom.commands.add '.ink-console atom-text-editor',
       'console:evaluate': ->
         ed = @getModel()
-        ed.inkConsole.emitter.emit 'eval', ed
+        ed.inkConsole.eval ed
+      'core:move-up': (e) ->
+        ed = @getModel()
+        ed.inkConsole.keyUp e, ed
+      'core:move-down': (e) ->
+        ed = @getModel()
+        ed.inkConsole.keyDown e, ed
+      'core:move-left': (e) ->
+        delete @getModel().inkConsole.prefix
+      'core:move-right': (e) ->
+        delete @getModel().inkConsole.prefix
       'core:backspace': (e) ->
         @getModel().inkConsole.cancelMode e
-      'console:previous-in-history': ->
-        @getModel().inkConsole.previous()
-      'console:next-in-history': ->
-        @getModel().inkConsole.next()
+
+    atom.commands.add '.ink-console',
+      'core:copy': ->
+        if (sel = document.getSelection().toString())
+          atom.clipboard.write sel
 
   @deactivate: ->
-    @openCmd.dispose()
-    @clearCmd.dispose()
+    @evalCmd.dispose()
 
   constructor: ->
-    @view.getModel = -> c
+    @view = new ConsoleView
+    @view.getModel = -> @
     @observeInput (cell) =>
       @watchModes cell
-    @onEval => @logInput()
+    @history = new HistoryProvider
 
-  view: new ConsoleView
+    @subs = atom.commands.add @view[0],
+      'console:previous-in-history': => @previous()
+      'console:next-in-history': => @next()
+
+  destroy: ->
+    @subs.dispose()
 
   isInput: false
 
   setGrammar: (g) ->
     @view.setGrammar g
 
+  eval: (ed) ->
+    if @isInput
+      input = @view.getInputEd()
+      if ed == input
+        @emitter.emit 'eval', ed
+      else
+        input.setText ed.getText()
+        @view.focusInput true
+        @view.scroll()
+
   input: ->
+    delete @prefix
     if not @isInput
       v = @view.inputView this
       @emitter.emit 'new-input', v
       @view.add v
+      @setMode v, @defaultMode()
       @isInput = true
 
   done: ->
-    # Makes the editor read-only
-    @view.getInput().querySelector('atom-text-editor').removeAttribute('tabindex')
-    @isInput = false
+    if @isInput
+      @view.scrollView.focus() # Defocus input
+      @isInput = false
 
   @debounce: (t, f) ->
     timeout = null
@@ -92,7 +120,9 @@ class Console
       p = p.splitDown()
       p.setFlexScale 1/2
     p.activateItem @view
-    p.onDidActivate => setTimeout  => @view.focusInput(true)
+    p.onDidActivate => setTimeout =>
+      if document.activeElement == @view[0] && @view.lastCellVisible() && @isInput
+          @view.focusInput(true)
 
   toggle: ->
     if atom.workspace.getPaneItems().indexOf(@view) > -1
@@ -103,12 +133,23 @@ class Console
 
   modes: -> {}
 
+  defaultMode: ->
+    for char, mode of @modes()
+      if char is 'default'
+        return mode
+
+  modeByName: (name) ->
+    for char, mode of @modes()
+      return mode if mode.name is name
+
   cursorAtBeginning: (ed) ->
     ed.getCursors().length == 1 and
     ed.getCursors()[0].getBufferPosition().isEqual [0, 0]
 
   setMode: (cell, mode) ->
-    ed = ed = cell.querySelector('atom-text-editor').getModel()
+    ed = cell.querySelector('atom-text-editor').getModel()
+    if mode?.constructor is String then mode = @modeByName(mode)
+    mode ?= @defaultMode()
     if not mode
       delete ed.inkConsoleMode
       if @view.defaultGrammar then ed.setGrammar @view.defaultGrammar
@@ -116,13 +157,13 @@ class Console
     else
       ed.inkConsoleMode = mode
       if mode.grammar then ed.setGrammar mode.grammar
-      @view.setIcon cell, mode.icon
+      @view.setIcon cell, mode.icon or 'chevron-right'
 
   watchModes: (cell) ->
     @edListener?.dispose()
     ed = cell.querySelector('atom-text-editor').getModel()
     @edListener = ed.onWillInsertText (e) =>
-      if (mode = @modes()[e.text]) and @cursorAtBeginning(ed) and not ed.inkConsoleMode
+      if (mode = @modes()[e.text]) and @cursorAtBeginning(ed) and ed.inkConsoleMode isnt mode
         e.cancel()
         @setMode cell, mode
 
@@ -133,21 +174,40 @@ class Console
       @setMode cell
 
   logInput: ->
-    @history ?= []
     ed = @view.getInputEd()
     input = ed.getText()
     mode = ed.inkConsoleMode
-    if input && input != @history[@history.length-1]?.input then @history.push {input, mode}
-    @historyPos = @history.length
+    @history.push
+      input: input
+      mode: mode?.name
 
-  previous: ->
-    if @historyPos > 0
-      @historyPos--
-      @view.getInputEd().setText @history[@historyPos].input
-      @setMode @view.getInput(), @history[@historyPos].mode
+  moveHistory: (up) ->
+    ed = @view.getInputEd()
+    if ed.getText() or not @prefix?
+      pos = ed.getCursorBufferPosition()
+      text = ed.getTextInRange [[0,0], pos]
+      @prefix = {pos, text}
+    next = if up
+      @history.getPrevious @prefix.text
+    else
+      @history.getNext @prefix.text
+    ed.setText next.input
+    @setMode @view.getInput(), next.mode
+    ed.setCursorBufferPosition @prefix.pos or [0, 0]
 
-  next: ->
-    if @historyPos < @history.length
-      @historyPos += 1
-      @view.getInputEd().setText (@history[@historyPos]?.input or "")
-      @setMode @view.getInput(), @history[@historyPos]?.mode
+  previous: -> @moveHistory true
+  next: -> @moveHistory false
+
+  keyUp: (e, ed) ->
+    if ed == @view.getInputEd()
+      curs = ed.getCursorsOrderedByBufferPosition()
+      if curs.length is 1 and (@prefix? or curs[0].getBufferRow() == 0)
+        e.stopImmediatePropagation()
+        @previous()
+
+  keyDown: (e, ed) ->
+    if ed == @view.getInputEd()
+      curs = ed.getCursorsOrderedByBufferPosition()
+      if curs.length is 1 and (@prefix? or curs[0].getBufferRow()+1 == ed.getLineCount())
+        e.stopImmediatePropagation()
+        @next()
