@@ -112,6 +112,18 @@ class Result
 
   # Bulk Actions
 
+  @all: -> # TODO: scope selector
+    results = []
+    for item in atom.workspace.getPaneItems() when atom.workspace.isTextEditor item
+      item.findMarkers().filter((m) -> m.result?).forEach (m) ->
+        results.push m.result
+    results
+
+  @invalidateAll: ->
+    for result in @all()
+      delete result.text
+      result.invalidate()
+
   @forLines: (ed, start, end, type = 'any') ->
     ed.findMarkers().filter((m) -> m.result? &&
                                    m.getBufferRange().intersectsRowRange(start, end) &&
