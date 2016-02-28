@@ -6,15 +6,18 @@ class HistoryProvider
 
   set: (@items) ->
     @items ?= []
-    @position = @items.length
+    @resetPosition()
 
   push: (x) ->
     @lastPosition = @position
     @items.push x
-    @position = @items.length
+    @resetPosition()
     @removeCycles()
 
   getCurrent: -> @items[@position] or input: ""
+
+  resetPosition: ->
+    @position = @items.length
 
   isAtEnd: ->
     @position is @items.length
@@ -44,6 +47,7 @@ class HistoryProvider
     a.mode is b.mode and a.input is b.input
 
   removeCycles: ->
+    return if @items.length < 2
     for n in [1..Math.min(@items.length/2, 100)]
       for i in [1..n]
         if @isEquiv @items[@items.length-i], @items[@items.length-(i+n)]
