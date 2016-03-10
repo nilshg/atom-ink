@@ -17,11 +17,6 @@ module.exports = Ink =
     PlotPane.activate()
     Workspace.activate()
 
-    edId = 1
-    atom.workspace.observeTextEditors (ed) ->
-      if not ed.getPath()?
-        ed.getBuffer().inkId ?= edId++
-
     try
       if id = localStorage.getItem 'metrics.userId'
         http.get "http://data.junolab.org/hit?id=#{id}&app=ink"
@@ -29,10 +24,6 @@ module.exports = Ink =
   deactivate: ->
     Result.deactivate()
     Console.deactivate()
-
-    # Not sure why this gets set, but it prevents pane serialisation
-    pkg = atom.packages.getActivePackage('ink')
-    localStorage.clear(pkg.getCanDeferMainModuleRequireStorageKey())
 
   provide: ->
     highlight: (ed, start, end) =>
