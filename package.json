@@ -1,8 +1,8 @@
 {
   "name": "ink",
   "main": "./lib/ink",
-  "version": "0.3.1",
-  "description": "A short description of your package",
+  "version": "0.4.0",
+  "description": "Ink is a toolkit for building IDEs in Atom",
   "keywords": [],
   "repository": "https://github.com/JunoLab/atom-ink",
   "license": "MIT",

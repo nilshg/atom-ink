@@ -8,11 +8,17 @@
   to   { background-color: @background-color-info; }
 }
 
-.ink-console {
+ink-console {
   width: 100%;
   height: 100%;
   background-color: @syntax-background-color;
   color: @syntax-text-color;
+  overflow: auto;
+
+  .items {
+    margin-top: 5px;
+    margin-bottom: 10px;
+  }
 
   atom-text-editor::shadow {
     .cursor-line {
@@ -25,14 +31,15 @@
     width: @gutter-width;
     color: @syntax-gutter-text-color;
     background-color: @syntax-gutter-background-color;
+    -webkit-user-select: none;
   }
   .divider {
     height: 1px;
     background-color: @syntax-wrap-guide-color;
     margin-left: 50px;
     margin-right: 50px;
-    margin-top: 2px;
-    margin-bottom: 2px;
+    margin-top: 3px;
+    margin-bottom: 3px;
 
     transition: all 0.1s ease;
     top: 0;
@@ -44,11 +51,6 @@
     &.loading {
       -webkit-animation: divider-pulse 2s infinite alternate ease-in-out;
     }
-  }
-  .items-scroll {
-    width: 100%;
-    height: 100%;
-    overflow: auto;
   }
   .spacer {
     width: 100%;
@@ -72,6 +74,7 @@
       position: absolute;
       color: @syntax-gutter-text-color;
       text-align:center;
+      -webkit-user-select: none;
       .icon {
         transition: all 0.1s ease;
         &.ink-hide {
@@ -82,6 +85,8 @@
     }
     .content {
       margin-left: @gutter-width;
+      padding-left: 5px;
+      padding-right: 20px;
     }
     .stream {
       font-family: Menlo, Consolas, 'DejaVu Sans Mono', monospace;
@@ -95,11 +100,8 @@
     .result {
       -webkit-user-select: none;
       cursor: default;
-      &.err {
+      &.error {
         color: @text-color-error;
-      }
-      .fade {
-        color: @text-color-subtle;
       }
     }
   }
