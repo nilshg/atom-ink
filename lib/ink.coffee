@@ -6,17 +6,16 @@ highlights = require './editor/highlights'
 Result = require './editor/result'
 Spinner = require './editor/spinner'
 Console = require './console/console'
+PlotPane = require './plots/pane'
+Workspace = require './workspace/workspace'
 tree    = require './tree'
 
 module.exports = Ink =
   activate: ->
     Result.activate()
     Console.activate()
-
-    edId = 1
-    atom.workspace.observeTextEditors (ed) ->
-      if not ed.getPath()?
-        ed.getBuffer().inkId ?= edId++
+    PlotPane.activate()
+    Workspace.activate()
 
     try
       if id = localStorage.getItem 'metrics.userId'
@@ -26,10 +25,6 @@ module.exports = Ink =
     Result.deactivate()
     Console.deactivate()
 
-    # Not sure why this gets set, but it prevents pane serialisation
-    pkg = atom.packages.getActivePackage('ink')
-    localStorage.clear(pkg.getCanDeferMainModuleRequireStorageKey())
-
   provide: ->
     highlight: (ed, start, end) =>
       block.highlight ed, start, end
@@ -37,5 +32,7 @@ module.exports = Ink =
     Spinner: Spinner
     Result: Result
     Console: Console
+    Workspace: Workspace
+    PlotPane: PlotPane
     highlights: highlights
     tree: tree

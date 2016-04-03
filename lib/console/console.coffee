@@ -1,7 +1,5 @@
-# TODO: autocomplete
-
 {Emitter, CompositeDisposable} = require 'atom'
-ConsoleView = require './view'
+ConsoleElement = require './view'
 HistoryProvider = require './history'
 {closest} = require './helpers'
 
@@ -35,25 +33,7 @@ class Console
   @deactivate: ->
     @subs.dispose()
 
-  @registerViews: ->
-    atom.views.addViewProvider Console, (c) ->
-      new ConsoleView().initialize c
-
-    atom.deserializers.add
-      name: 'InkConsole'
-      deserialize: ({id}) ->
-        Console.registered[id] = new Console(id: id)
-
-  activate: ->
-    for pane in atom.workspace.getPanes()
-      for item in pane.getItems()
-        if item is this
-          pane.activate()
-          pane.activateItem this
-          return true
-    return false
-
-  constructor: ({initialInput, @id}={}) ->
+  constructor: ({initialInput}={}) ->
     @items = []
     @history = new HistoryProvider
     @emitter = new Emitter
@@ -123,6 +103,7 @@ class Console
     @done()
     @clear()
     @input()
+    @history.resetPosition()
     @focusInput true
 
   itemForView: (view) ->
@@ -242,9 +223,10 @@ class Console
 
   moveHistory: (up) ->
     {editor} = @getInput()
-    if editor.getText() or not @prefix?
+    if (editor.getText() or not @prefix?) and @prefix?.pos?[0] isnt Infinity
       pos = editor.getCursorBufferPosition()
       text = editor.getTextInRange [[0,0], pos]
+      pos = [Infinity, Infinity] if text is ''
       @prefix = {pos, text}
     next = if up
       @history.getPrevious @prefix.text
@@ -273,21 +255,4 @@ class Console
         e.stopImmediatePropagation()
         @next()
 
-  # Serialisation
-
-  @registered: {}
-
-  id: ''
-
-  serialize: ->
-    if @id
-      deserializer: 'InkConsole'
-      id: @id
-
-  @fromId: (id) ->
-    if cons = Console.registered[id]
-      cons
-    else
-      Console.registered[id] = new Console(id: id)
-
-Console.registerViews()
+require('../pane-mixin')(Console, ConsoleElement)
