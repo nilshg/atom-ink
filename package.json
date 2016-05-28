@@ -1,7 +1,7 @@
 {
   "name": "ink",
   "main": "./lib/ink",
-  "version": "0.4.2",
+  "version": "0.4.4",
   "description": "Ink is a toolkit for building IDEs in Atom",
   "keywords": [],
   "repository": "https://github.com/JunoLab/atom-ink",
@@ -10,7 +10,9 @@
     "atom": ">=1.0.0 <2.0.0"
   },
   "dependencies": {
-    "atom-space-pen-views": "^2.0.0"
+    "atom-space-pen-views": "^2.0.0",
+    "fuzzaldrin-plus": "^0.1.0",
+    "underscore-plus": "*"
   },
   "providedServices": {
     "ink": {

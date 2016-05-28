@@ -17,9 +17,9 @@ class Console
       'core:move-down': (e) ->
         getConsole(this).keyDown e, this
       'core:move-left': (e) ->
-        delete getConsole(this).prefix
+        getConsole(this).resetPrefix()
       'core:move-right': (e) ->
-        delete getConsole(this).prefix
+        getConsole(this).resetPrefix()
       'core:backspace': (e) ->
         getConsole(this).cancelMode this
 
@@ -35,6 +35,7 @@ class Console
 
   constructor: ({initialInput}={}) ->
     @items = []
+    @maxSize = 1000
     @history = new HistoryProvider
     @emitter = new Emitter
     initialInput ?= true
@@ -51,8 +52,11 @@ class Console
   push: (cell) ->
     @items.push cell
     @emitter.emit 'did-add-item', cell
+    @limitHistory()
 
   onDidAddItem: (f) -> @emitter.on 'did-add-item', f
+
+  onDidDeleteFirstItems: (f) -> @emitter.on 'did-delete-first-items', f
 
   insert: (cell, i) ->
     if i >= @items.length or @items.length is 0
@@ -60,6 +64,13 @@ class Console
     else
       @items.splice(i, 0, cell)
       @emitter.emit 'did-insert-item', [cell, i]
+      @limitHistory()
+
+  limitHistory: ->
+    itemsToDelete = @items.length - @maxSize
+    if itemsToDelete <= 0 then return
+    @items.splice 0, itemsToDelete
+    @emitter.emit 'did-delete-first-items', itemsToDelete
 
   onDidInsertItem: (f) -> @emitter.on 'did-insert-item', f
 
@@ -76,7 +87,7 @@ class Console
   lastOutput: -> @items[@items.length - (if @getInput() then 2 else 1)]
 
   input: ->
-    delete @prefix
+    @resetPrefix()
     if not @getInput()
       item = type: 'input', input: true
       @push @setMode item
@@ -223,9 +234,14 @@ class Console
       input: editor.getText()
       mode: mode?.name
 
+  resetPrefix: ->
+    @prefix?.listener?.dispose()
+    delete @prefix
+
   moveHistory: (up) ->
     {editor} = @getInput()
     if (editor.getText() or not @prefix?) and @prefix?.pos?[0] isnt Infinity
+      @resetPrefix()
       pos = editor.getCursorBufferPosition()
       text = editor.getTextInRange [[0,0], pos]
       pos = [Infinity, Infinity] if text is ''
@@ -234,7 +250,9 @@ class Console
       @history.getPrevious @prefix.text
     else
       @history.getNext @prefix.text
+    @prefix.listener?.dispose()
     editor.setText next.input
+    @prefix.listener = editor.onDidChange => @resetPrefix()
     @setMode @getInput(), next.mode
     editor.setCursorBufferPosition @prefix.pos or [0, 0]
 

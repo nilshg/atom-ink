@@ -1,5 +1,10 @@
 # TODO: better scrolling behaviour
+{throttle} = require 'underscore-plus'
+{$, $$} = require 'atom-space-pen-views'
 {CompositeDisposable} = require 'atom'
+trees = require '../tree'
+views = require '../util/views'
+{div, span} = views.tags
 
 # ## Result API
 # `Result`s are DOM elements which represent the result of some operation. They
@@ -20,9 +25,11 @@
 # the current editor.
 
 metrics = ->
-  try
-    if id = localStorage.getItem 'metrics.userId'
-      require('http').get "http://data.junolab.org/hit?id=#{id}&app=ink-result"
+  if id = localStorage.getItem 'metrics.userId'
+    r = require('http').get "http://data.junolab.org/hit?id=#{id}&app=ink-result"
+    r.on 'error', ->
+
+metrics = throttle metrics, 60*60*1000
 
 module.exports =
 class Result
@@ -42,15 +49,16 @@ class Result
     @timeout 20, =>
       @view.classList.remove 'ink-hide'
 
-  createView: ({error, content, fade}) ->
+  createView: (opts) ->
+    {content, fade, loading} = opts
     @view = document.createElement 'div'
     @view.classList.add 'ink', 'result'
     switch @type
       when 'inline'
         @view.classList.add 'inline'
-        @view.style.top = -@editor.getLineHeightInPixels() + 'px'
-      when 'block' then @view.classList.add 'under'
-    if error then @view.classList.add 'error'
+        atom.config.observe 'editor.lineHeight', (h) =>
+          @view.style.top = -h + 'em';
+      when 'block'  then @view.classList.add 'under'
     # @view.style.pointerEvents = 'auto'
     @view.addEventListener 'mousewheel', (e) ->
       e.stopPropagation()
@@ -61,7 +69,16 @@ class Result
     @disposables.add atom.commands.add @view,
       'inline-results:clear': (e) => @remove()
     fade and @fadeIn()
-    if content? then @view.appendChild content
+
+    if content? then @setContent content, opts
+    if loading then @setContent views.render(span 'loading icon icon-gear'), opts
+
+  setContent: (view, {error, loading}={}) ->
+    while @view.firstChild?
+      @view.removeChild @view.firstChild
+    if error then @view.classList.add 'error' else @view.classList.remove 'error'
+    if loading then @view.classList.add 'loading' else @view.classList.remove 'loading'
+    @view.appendChild view
 
   lineRange: (start, end) ->
     [[start, 0], [end, @editor.lineTextForBufferRow(end).length]]
@@ -76,6 +93,9 @@ class Result
       when 'block' then mark.type = 'block'; mark.position = 'after'
     @editor.decorateMarker @marker, mark
     @disposables.add @marker.onDidChange (e) => @checkMarker e
+
+  toggleTree: ->
+    trees.toggle $(@view).find('> .tree')
 
   remove: ->
     @view.classList.add 'ink-hide'
@@ -151,12 +171,18 @@ class Result
           done = true
     e.abortKeyBinding() unless done
 
+  @toggleCurrent: ->
+    ed = atom.workspace.getActiveTextEditor()
+    for sel in ed.getSelections()
+      rs = @forLines ed, sel.getHeadBufferPosition().row, sel.getTailBufferPosition().row
+      rs.map (r) -> r.toggleTree()
+
   # Commands
 
   @activate: ->
     @subs = new CompositeDisposable
     @subs.add atom.commands.add 'atom-text-editor:not([mini])',
-      'inline-results:clear-current': (e) => @removeCurrent e
+      'inline:clear-current': (e) => @removeCurrent e
       'inline-results:clear-all': => @removeAll()
       'inline-results:toggle': => @toggleCurrent()
 

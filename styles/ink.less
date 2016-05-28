@@ -25,6 +25,10 @@ atom-text-editor::shadow {
     transition: opacity 0.2s;
   }
 
+  div.doc-highlight .region{
+    background-color: fade(@background-color-info, 10%);
+  }
+
   div.ink.block {
     background: url("atom://ink/res/stripe.png");
     background-size: 20px;
@@ -44,15 +48,13 @@ atom-text-editor::shadow {
   font-family: @font-family;
   color: @text-color;
 
+  cursor: default;
+
   background-color: @inset-panel-background-color;
 
   border-top: 1px solid @syntax-wrap-guide-color;
   border-bottom: 1px solid @syntax-wrap-guide-color;
-
-  &.ink-hide {
-    opacity: 0;
-    transform: translate(10px);
-  }
+  padding-left: 5px;
 }
 
 
@@ -62,15 +64,13 @@ atom-text-editor::shadow {
 
   &.error {
     color: @text-color-error;
+    border-left: 2px solid @background-color-error;
   }
 
-  // @inline-background-color: fade(@inset-panel-background-color, 80%);
-  @inline-background-color: @inset-panel-background-color;
-  background: linear-gradient(to top, darken(@inline-background-color, 5%),
-                                      @inline-background-color 10%,
-                                      @inline-background-color 90%,
-                                      lighten(@inline-background-color, 5%));
-  box-shadow: 0.5px 0.5px 2px @base-border-color;
+  background: contrast(@syntax-background-color,
+                       darken(@syntax-background-color, 4%),
+                       lighten(@syntax-background-color, 4%));
+  border-left: 2px solid @background-color-info;
   border-radius: 3px;
 
   padding: 0px 5px 0px 5px;
@@ -82,8 +82,35 @@ atom-text-editor::shadow {
   overflow: hidden;
   white-space: pre;
 
+  * {
+    vertical-align: top;
+  }
+
+  p {
+    margin: 0;
+    padding: 0;
+  }
+
   &:hover {
     overflow: auto;
+  }
+
+  &.loading {
+    opacity: 0.5;
+    .icon:before {
+      height: initial;
+      width: initial;
+      animation: spin 4s linear infinite;
+      @keyframes spin { 100% { transform:rotate(1turn); } }
+    }
+  }
+
+  .icon {
+    text-align: center;
+    &:before {
+      margin: 0;
+      font-size: inherit;
+    }
   }
 
   &.ink-hide, &.ink-hide.invalid {
@@ -100,19 +127,71 @@ atom-text-editor::shadow {
     max-width: 500px;
     max-height: 250px;
   }
+
+  .editor.editor-colors {
+    word-wrap: normal;
+    white-space: pre;
+    background: none;
+    padding: 0;
+  }
+}
+
+.ink.stepper {
+  position: relative;
+  left: 20px;
+  border-left: 2px solid @text-color-info;
+  border-radius: 3px;
+  white-space: nowrap;
+  transition: all 0.2s;
+  opacity: 1;
+  background-color: fade(@background-color-info, 15%);
+  &.ink-hide {
+    opacity: 0;
+    transform: translate(10px);
+  }
+}
+
+.tab.debug .title:before {
+  font-family: "Octicons Regular";
+  font-size: medium;
+  text-align: center;
+  content: "\f091";
+  font-style: normal !important;
+  margin-right: 5px;
+  vertical-align: top;
+  // For better visualisation in Mac OS
+  -webkit-font-smoothing: antialiased;
 }
 
 .ink.tree {
+  display: inline-block;
   > .icon {
-    position: relative;
     float: left;
-    width: 15px;
+    width: 16px;
   }
   .gutted {
-    margin-left: 15px;
+    margin-left: 20px;
+  }
+  .icon {
+    text-align: center;
+    transition: all 0.1s ease-out;
+    &.open {
+      transform: rotate(0.25turn);
+    }
   }
 }
 
-ink-console .ink.tree > .icon {
-  position: absolute;
+.gotodef-panel {
+  .two-lines {
+    padding: 0.2em 0.75em 0.2em 1em !important;
+    .primary-line, .secondary-line {
+      line-height: 1.8em;
+    }
+  }
+  .error-message {
+    color: @text-color-error;
+  }
+  .character-match {
+    font-weight: bold;
+  }
 }

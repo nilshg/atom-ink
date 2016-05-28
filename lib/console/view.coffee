@@ -9,8 +9,10 @@ class ConsoleElement extends HTMLElement
     @items.classList.add 'items'
     @appendChild @items
 
-    @style.fontSize = atom.config.get('editor.fontSize') + 'px'
-    @style.fontFamily = atom.config.get('editor.fontFamily')
+    atom.config.observe 'editor.fontSize', (v) =>
+      @style.fontSize = v + 'px'
+    atom.config.observe 'editor.fontFamily', (v) =>
+      @style.fontFamily = v
 
     @views = {}
     for view in ['input', 'stdout', 'stderr', 'info', 'result']
@@ -21,6 +23,7 @@ class ConsoleElement extends HTMLElement
     @model.onDidAddItem (item) => @addItem item
     @model.onDidInsertItem ([item, i]) => @insertItem [item, i]
     @model.onDidClear => @clear()
+    @model.onDidDeleteFirstItems (n) => @deleteFirstItems n
     @model.onDone => if @hasFocus() then @focus()
     @model.onFocusInput (force) => @focusLast force
     @model.onLoading (status) => @loading status
@@ -63,6 +66,13 @@ class ConsoleElement extends HTMLElement
                                  # focused editor
     while @items.hasChildNodes()
       @items.removeChild @items.lastChild
+
+  deleteFirstItems: (n) ->
+    # need to remove the cell and the divider (the +1 is for having an easier
+    # while loop)
+    n = 2*n + 1
+    while n -= 1
+      @items.removeChild @items.firstChild
 
   queryLast: (view, q) ->
     items = view.querySelectorAll q
@@ -127,6 +137,7 @@ class ConsoleElement extends HTMLElement
     setTimeout (-> ed.component?.presenter.scrollPastEnd = false), 0
     item.editor = ed.getModel()
     item.editor.setLineNumberGutterVisible(false)
+    item.editor.setSoftWrapped true
     @updateGrammar item
     @observeKey item, 'grammar', => @updateGrammar item
     ed
